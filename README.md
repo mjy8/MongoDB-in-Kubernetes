@@ -32,7 +32,7 @@ kubectl exec mongodbconfigstateful-0 -c mongodconfigcontainer -- mongo --eval 'r
 
 ```
 
-#### Deploy Router pod in k8s
+#### Deploy of Router pod in k8s:
 
 ```
 #Start the routers
@@ -88,6 +88,69 @@ Totals
  - From the above shard distribution status, the single shard replicaset holds the two chunks where documents are split based on the shard hash key.
  
  
+#### Scale the Shards horiznotally:
+- In order to scale, we can add more sharded replicaset so the chunks gets distributed across these shards based on the hashed key.
 
+```
+#Deploy another shard replicaset to scale
+kubectl create -f scalemongodbShards.yaml
+kubectl get pods -w -l role=mongoshard
+kubectl describe pods mongodbshardstateful2-0
+# Run this script to perform rs.initiate and sh.addshard()
+addShardsRouter_scale.sh
+#Get the status
+kubectl exec mongodbshardstateful2-0 -c mongodshardcontainer -- mongo --eval 'rs.status()'
+kubectl exec mongosrouter-0 -c mongosroutercontainer -- mongo --eval 'sh.status()' 
+```
+
+- Now observe the chunk distribution after adding new shard replicaset
+```
+#Access the router
+kubectl exec -it mongosrouter-0 -c mongosroutercontainer bash
+#Create DB/collection and enable hash key sharding
+mongo
+#Get the shard distribution status
+db.nbximage.getShardDistribution()
+ 
+mongos> db.nbximage.getShardDistribution()
+Shard mongoreplicaset1shard at mongoreplicaset1shard/mongodbshardstateful-0.mongodbshardservice.default.svc.cluster.local:27017,mongodbshardstateful-1.mongodbshardservice.default.svc.cluster.local:27017,mongodbshardstateful-2.mongodbshardservice.default.svc.cluster.local:27017
+ data : 136KiB docs : 1000 chunks : 1
+ estimated data per chunk : 136KiB
+ estimated docs per chunk : 1000
+Shard mongoreplicaset2shard at mongoreplicaset2shard/mongodbshardstateful2-0.mongodbshardservice2.default.svc.cluster.local:27017
+ data : 66KiB docs : 484 chunks : 1
+ estimated data per chunk : 66KiB
+ estimated docs per chunk : 484
+Totals
+ data : 202KiB docs : 1484 chunks : 2
+ Shard mongoreplicaset1shard contains 67.36% data, 67.38% docs in cluster, avg obj size on shard : 139B
+ Shard mongoreplicaset2shard contains 32.63% data, 32.61% docs in cluster, avg obj size on shard : 139B
+ ```
+ 
+ #### Scale the Replicaset:
+ - We can also scale the number of replicas within the shard replicaset to acheive better read performance or resiliency within the sharded replicas.
+ ```
+ #scale the replicas within the shard replicaset (need not create new service/statefulset here)
+kubectl scale sts mongodbshardstateful --replicas=4
+#Run this script to make sure replica is in ready/secondary state (modify with vote:0 to disable the vote )
+scaleShardReplicas.sh
+#Get the status
+kubectl exec mongodbshardstateful-0 -c mongodshardcontainer -- mongo --eval 'rs.status()'
+kubectl exec mongosrouter-0 -c mongosroutercontainer -- mongo --eval 'sh.status()'
+```
+
+#### Resiliency on Sharded replicas:
+- Test the fault tolerance or liveness probe when one of primary shard goes down or when mongod/mongos service is crashed. During the split brain scenario and if the quorum is manitained within the shard replicaset(1 primary + 2 secondary/Arbiter) , the other two nodes which are alive can vote and one of the shard gets elected as primary.
+
+```
+#Get the shard status with 3 node replicaset
+kubectl exec mongodbshardstateful-0 -c mongodshardcontainer -- mongo --eval 'rs.status()'
+#kill the mongod service
+kubectl exec mongodbshardstateful-0 -- kill 1
+#watch the restart of pods
+kubectl get pod -w -l role=mongoshard  (another terminal)
+#Get the shard status after primary pod get restarted and notice another pod will claim the primary state based on the votes
+kubectl exec mongodbshardstateful-0 -c mongodshardcontainer -- mongo --eval 'rs.status()'
+```
 
 
