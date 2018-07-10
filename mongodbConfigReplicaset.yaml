@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodbconfigservice
+  labels:
+    name: mongoshard
+spec:
+  ports:
+  - port: 27017
+    targetPort: 27017
+  clusterIP: None
+  selector:
+    role: mongoconfig
+---
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: mongodbconfigstateful
+spec:
+  selector:
+    matchLabels:
+      role: mongoconfig
+  serviceName: mongodbconfigservice
+  replicas: 3
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        role: mongoconfig
+        replicaset: mongoconfigs
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 50 #set to 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: replicaset
+                  operator: In
+                  values:
+                  - mongoconfigs
+              topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 10      
+      containers:
+        - name: mongodconfigcontainer
+          image: mongo:3.6.2
+          command:
+            - "numactl"
+            - "--interleave=all"
+            - "mongod"
+            - "--configsvr"            
+            - "--replSet"
+            - "mongoreplicaset1config"
+            - "--bind_ip_all"
+            - "--port"
+            - "27017"
+          ports:
+            - containerPort: 27017
+          volumeMounts:           
+            - name: mongodbconfigpvc
+              mountPath: /data/db
+          readinessProbe:
+            exec:
+              command:
+              - mongo
+              - --eval
+              - "db.adminCommand('ping')"
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 120
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+              - mongo
+              - --eval
+              - "db.getMongo()"
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 120
+            failureThreshold: 6
+  volumeClaimTemplates:
+  - metadata:
+      name: mongodbconfigpvc
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: sharedfs
+      resources:
+        requests:
+          storage: 5Gi
