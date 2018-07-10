@@ -1,7 +1,7 @@
 # MongoDB-in-Kubernetes
 MongoDB Sharded cluster deployed in K8s cluster
 
-### Deployment of pods for Shard and Config server:
+#### Deployment of pods for Shard and Config server:
 
 - Here the shard replicaset stores actual data or chunks (collection of documents) and config servers replicaset stores metadata and config information of the mongodb cluster. 
 
@@ -32,7 +32,7 @@ kubectl exec mongodbconfigstateful-0 -c mongodconfigcontainer -- mongo --eval 'r
 
 ```
 
-#### Deploy of Router pod in k8s:
+#### Deployment of Router pod in k8s:
 
 ```
 #Start the routers
